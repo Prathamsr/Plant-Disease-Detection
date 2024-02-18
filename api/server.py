@@ -10,7 +10,7 @@ import sys
 
 try:
     client = pymongo.MongoClient(
-        "mongodb+srv://pratham:hello123@diseasedetect.tgp72fs.mongodb.net/?retryWrites=true&w=majority")
+        "mongodb+srv://pratham:<password>@diseasedetect.tgp72fs.mongodb.net/?retryWrites=true&w=majority")
     print("connected")
 except pymongo.errors.ConfigurationError:
     print("An Invalid URI host error was received. Is your Atlas host name correct in your connection string?")
