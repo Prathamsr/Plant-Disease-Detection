@@ -1,75 +1,87 @@
-from fastapi import FastAPI, File, UploadFile ,Form
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import numpy as np
+import tensorflow as tf
 from io import BytesIO
 from PIL import Image
-import tensorflow as tf
-import pymongo
-import sys
+import os
 
-try:
-    client = pymongo.MongoClient(
-        "mongodb+srv://pratham:<password>@diseasedetect.tgp72fs.mongodb.net/?retryWrites=true&w=majority")
-    print("connected")
-except pymongo.errors.ConfigurationError:
-    print("An Invalid URI host error was received. Is your Atlas host name correct in your connection string?")
-    sys.exit(1)
+# Define classes and solutions
+classes = {
+    'apple': ['Apple___Apple_scab', 'Apple___Black_rot', 'Apple___Cedar_apple_rust', 'Apple___healthy'],
+    'cherry': ['Cherry_(including_sour)___healthy', 'Cherry_(including_sour)___Powdery_mildew'],
+    'peach': ['Peach___Bacterial_spot', 'Peach___healthy'],
+    'pepper': ['Pepper,_bell___Bacterial_spot', 'Pepper,_bell___healthy'],
+    'potato': ['Potato___Early_blight', 'Potato___healthy', 'Potato___Late_blight'],
+    'strawberry': ['Strawberry___healthy', 'Strawberry___Leaf_scorch']
+}
 
-db = client.myDatabase
-my_collection = db["diseases"]
-my_solutions = db["solutions"]
+solutions = {
+    'Apple___Apple_scab': "Use fungicides like Captan or Mancozeb. Practice proper pruning to improve air circulation.",
+    'Apple___Black_rot': "Remove and destroy infected fruit and branches. Apply fungicides during the growing season.",
+    'Apple___Cedar_apple_rust': "Use resistant apple varieties. Apply fungicides like Myclobutanil at bud break.",
+    'Apple___healthy': "Maintain proper care with adequate watering, fertilization, and pest control.",
+    'Cherry_(including_sour)___healthy': "Ensure regular pruning, pest management, and balanced fertilization.",
+    'Cherry_(including_sour)___Powdery_mildew': "Apply sulfur-based fungicides. Remove and dispose of infected leaves.",
+    'Peach___Bacterial_spot': "Use copper-based bactericides. Avoid overhead irrigation and remove infected material.",
+    'Peach___healthy': "Maintain good cultural practices with proper pruning and pest management.",
+    'Pepper,_bell___Bacterial_spot': "Use disease-free seeds, crop rotation, and copper-based bactericides.",
+    'Pepper,_bell___healthy': "Maintain optimal growing conditions and monitor for pests or diseases.",
+    'Potato___Early_blight': "Apply fungicides like Chlorothalonil or Mancozeb. Practice crop rotation.",
+    'Potato___healthy': "Ensure proper soil fertility and drainage. Monitor for pests or diseases.",
+    'Potato___Late_blight': "Apply fungicides like Metalaxyl or Mancozeb. Remove infected plants promptly.",
+    'Strawberry___healthy': "Maintain clean cultivation practices and proper fertilization.",
+    'Strawberry___Leaf_scorch': "Remove and destroy infected leaves. Apply fungicides like Captan or Thiram."
+}
 
-def get_solution(disease):
-    my_doc = my_solutions.find_one({"disease":disease})
-    return my_doc
-def get_Classes(plant):
-    my_doc = my_collection.find_one({"name": plant})
-    return my_doc
-app = FastAPI()
+app = Flask(__name__)
 
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Enable CORS for all routes (for development purposes)
+CORS(app)
 
-CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]
-
-@app.get("/ping")
-async def ping():
-    return "Hello, I am alive"
-
+# Function to read image as numpy array
 def read_file_as_image(data) -> np.ndarray:
     image = np.array(Image.open(BytesIO(data)))
     return image
 
-@app.post("/predict")
-async def predict(
-    file: UploadFile = File(...),
-    plant: str =Form(...),
-):
-    image = read_file_as_image(await file.read())
-    img_batch = np.expand_dims(image, 0)
-    MODEL = tf.keras.models.load_model(f"./models/{plant}")
+@app.route('/predict', methods=['POST'])
+def predict():
+    # Check if the file and form data are provided
+    if 'file' not in request.files or 'plant' not in request.form:
+        return jsonify({"message": "Image and plant type are required"}), 400
     
-    predictions = MODEL.predict(img_batch)
-    classes=get_Classes(plant)
-    predicted_class = classes["disease"][np.argmax(predictions[0])]
-    confidence = np.max(predictions[0])
-    data=get_solution(predicted_class)
-    return {
-        'class': predicted_class,
-        'confidence': float(confidence),
-        'plant':plant,
-        'solutin':data['solution']
-    }
+    file = request.files['file']
+    plant = request.form['plant']
+    
+    if file.filename == '':
+        return jsonify({"message": "No file selected"}), 400
+    
+    # Read the image and prepare the input
+    image = read_file_as_image(file.read())
+    img_batch = np.expand_dims(image, 0)
+    
+    # Load the model for the specified plant type
+    model_path = f"./models/{plant}"
+    if not os.path.exists(model_path):
+        return jsonify({"message": f"Model for {plant} not found"}), 400
 
-if __name__ == "__main__":
-    uvicorn.run(app, host='localhost', port=8000)
+    model = tf.keras.models.load_model(model_path)
+    
+    # Predict the class
+    predictions = model.predict(img_batch)
+    predicted_class = classes[plant][np.argmax(predictions[0])]
+    confidence = np.max(predictions[0])
+    
+    # Get the solution
+    solution = solutions.get(predicted_class, "Solution not available.")
+    
+    # Return the prediction results
+    return jsonify({
+        'class': " ".join(predicted_class.replace('_'," ").replace(","," ").split(" ")),
+        'confidence': float(confidence),
+        'plant': plant,
+        'solution': solution
+    }), 200
+
+if __name__ == '__main__':
+    app.run(debug=True,  port=8000)
